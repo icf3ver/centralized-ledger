@@ -1,2 +1,3 @@
 /target
 *.pem
+/server/usr_dir/*
