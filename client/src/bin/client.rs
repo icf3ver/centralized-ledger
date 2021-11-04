@@ -6,7 +6,7 @@ use std::str::from_utf8;
 use rsa::{PublicKey, RsaPublicKey, RsaPrivateKey, PaddingScheme};
 
 const PRIVATE_KEY: &'static str = include_str!("../../private_key.pem");
-const SERVER: &'static str = "localhost:3333";
+const SERVER: &'static str = "localhost:5555";
 
 fn main() -> Result<(), io::Error> {
     println!("Uname:");
@@ -55,7 +55,7 @@ fn make_transaction(msg: &str) {
                 .expect("Signature Not Valid");
             
             // send signature and message
-            let msg: &[u8] = &[data, &signature[..]].concat()[..];
+            let msg: &[u8] = &[b"SEN", &data[..], &signature[..]].concat()[..];
             println!("{:?}", msg.len());
             stream.write(msg).unwrap();
 
