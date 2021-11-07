@@ -30,51 +30,61 @@ fn main() -> Result<(), io::Error> {
     let approved = approved.trim();
 
     if approved == "y" || approved == "Y" {
-        make_transaction(&transaction);
+        make_transaction(&sign_transaction(&transaction), false);
     }
     Ok(())
 }
 
-fn make_transaction(msg: &str) {
+fn sign_transaction(msg: &str) -> [u8; 303] {
+    let mut signed_msg: [u8; 303] = [0_u8; 303];
+    let (ty, inner) = signed_msg.split_at_mut(3);
+    ty.copy_from_slice(b"SEN");
+    let (dat, sig) = inner.split_at_mut(44);
+
+    // Sign
+    let sk = RsaPrivateKey::from_pkcs8_pem(PRIVATE_KEY).expect("failed to get private key");
+    let pk = RsaPublicKey::from(&sk);
+
+    let data = msg.as_bytes();
+    let hash: &[u8] = &sha2::Sha512::digest(&data[..])[..];
+    let padding = PaddingScheme::new_pkcs1v15_sign(Some(rsa::Hash::SHA3_512));
+    let signature = sk.sign(padding, &hash).expect("failed to sign");
+    
+    // Check Signature
+    let padding = PaddingScheme::new_pkcs1v15_sign(Some(rsa::Hash::SHA3_512));
+    pk.verify(padding, &hash, &signature)
+        .expect("Signature Not Valid");
+    
+    // copy slices into output
+    dat.copy_from_slice(data);
+    sig.copy_from_slice(&signature);
+
+    signed_msg
+}
+
+fn make_transaction(msg: &[u8], _await_data: bool) {
     match TcpStream::connect(SERVER) {
         Ok(mut stream) => {
             println!("Successfully connected");
 
-            // Sign
-            let sk = RsaPrivateKey::from_pkcs8_pem(PRIVATE_KEY).expect("failed to get private key");
-            let pk = RsaPublicKey::from(&sk);
-
-            let data = msg.as_bytes();
-            let hash: &[u8] = &sha2::Sha512::digest(&data[..])[..];
-            let padding = PaddingScheme::new_pkcs1v15_sign(Some(rsa::Hash::SHA3_512));
-            let signature = sk.sign(padding, &hash).expect("failed to sign");
-            
-            // Check Signature
-            let padding = PaddingScheme::new_pkcs1v15_sign(Some(rsa::Hash::SHA3_512));
-            pk.verify(padding, &hash, &signature)
-                .expect("Signature Not Valid");
-            
-            // send signature and message
-            let msg: &[u8] = &[b"SEN", &data[..], &signature[..]].concat()[..];
-            println!("{:?}", msg.len());
             stream.write(msg).unwrap();
 
-            println!("Sent transaction, awaiting confirmation...");
+            println!("Sent request, awaiting confirmation...");
 
-            let mut data = [0 as u8; 2];
-            match stream.read_exact(&mut data) {
+            let mut confirmation = [0 as u8; 2];
+            match stream.read_exact(&mut confirmation) {
                 Ok(_) => {
-                    if &data[..2] == b"GO" {
+                    if &confirmation[..2] == b"GO" {
                         println!("Success");
-                    } else if &data[..2] == b"NO" {
+                    } else if &confirmation[..2] == b"NO" {
                         println!("Failure");
                     } else {
-                        let text = from_utf8(&data).unwrap();
+                        let text = from_utf8(&confirmation).unwrap();
                         println!("Unexpected reply: {}", text);
                     }
                 },
                 Err(e) => {
-                    println!("Failed to receive data: {}", e);
+                    println!("Failed to receive confirmation: {}", e);
                 }
             }
         },
