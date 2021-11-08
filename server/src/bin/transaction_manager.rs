@@ -54,6 +54,7 @@ fn handle_transaction (transaction_buf: [u8; 300], mut stream: TcpStream) {
 fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) {
     /// how much first send to other. Default (None) is everyone.
     fn get_owe (first: Option<&str>, other: Option<&str>) -> u64 {
+        println!("{:?} {:?}", first, other);
         let mut result = 0;
         std::str::from_utf8(&fs::read(LEDGER).unwrap()[..]).unwrap().split('\n').for_each(|line| {
             if line != "" {
@@ -94,8 +95,8 @@ fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) 
     } else if &request == b"OWE" && other_target.is_some() {
         let other_target = other_target.unwrap();
         let result = match (first_target, other_target) { // no context is a good idea
-            (first, "*") => get_all_owed(first),
-            ("*", other) => get_all_owes(other),
+            (first, "*") => get_all_owes(first),
+            ("*", other) => get_all_owed(other),
             (first, other) => get_owe(Some(first), Some(other))
         } as i64;
         println!("Debt request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
