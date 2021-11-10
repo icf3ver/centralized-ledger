@@ -1,5 +1,6 @@
 use std::net::{TcpStream};
 use std::io::{self, Read, Write};
+use std::time::{SystemTime, UNIX_EPOCH};
 use rsa::pkcs8::FromPrivateKey;
 use sha2::Digest;
 use std::str::from_utf8;
@@ -26,19 +27,20 @@ fn user_verify_nonaction(ty: &[u8; 3], msg: &str) -> Result<[u8; 53], io::Error>
     }
 }
 
-fn user_verify_action(ty: &[u8; 3], msg: &str) -> Result<[u8; 303], io::Error> {
-    fn sign_action(ty: &[u8; 3], msg: &str) -> [u8; 303] {
-        let mut signed_msg: [u8; 303] = [0_u8; 303];
+fn user_verify_action(ty: &[u8; 3], msg: &str) -> Result<[u8; 311], io::Error> {
+    fn sign_action(ty: &[u8; 3], msg: &str) -> [u8; 311] {
+        let mut signed_msg: [u8; 311] = [0_u8; 311];
         let (otyp, inner) = signed_msg.split_at_mut(3);
         otyp.copy_from_slice(ty);
-        let (dat, sig) = inner.split_at_mut(44);
+        let (dat, sig) = inner.split_at_mut(52);
 
         // Sign
         let sk = RsaPrivateKey::from_pkcs8_pem(PRIVATE_KEY).expect("failed to get private key");
         let pk = RsaPublicKey::from(&sk);
 
-        let data = msg.as_bytes();
-        let hash: &[u8] = &sha2::Sha512::digest(&data[..])[..];
+        let timestamped_msg = [&timestamp()[..], msg.as_bytes()].concat();
+
+        let hash: &[u8] = &sha2::Sha512::digest(&timestamped_msg[..])[..];
         let padding = PaddingScheme::new_pkcs1v15_sign(Some(rsa::Hash::SHA3_512));
         let signature = sk.sign(padding, &hash).expect("failed to sign");
         
@@ -50,7 +52,7 @@ fn user_verify_action(ty: &[u8; 3], msg: &str) -> Result<[u8; 303], io::Error> {
         // println!("{}", unsafe {std::str::from_utf8_unchecked(&signature[..])}); // unique id gen
         
         // copy slices into output
-        dat.copy_from_slice(data);
+        dat.copy_from_slice(&timestamped_msg[..]);
         sig.copy_from_slice(&signature);
 
         signed_msg
@@ -69,8 +71,12 @@ fn user_verify_action(ty: &[u8; 3], msg: &str) -> Result<[u8; 303], io::Error> {
     }
 }
 
-fn _get_next_action_id() -> Result<(), ()> {
-    todo!()
+// Time the best ID system xD
+fn timestamp() -> [u8; 8] {
+    let time = SystemTime::now();
+    let seconds_since_epoch = time.duration_since(UNIX_EPOCH)
+        .expect("system time before Unix epoch").as_secs();
+    seconds_since_epoch.to_be_bytes()
 }
 
 fn main() -> Result<(), io::Error> {
