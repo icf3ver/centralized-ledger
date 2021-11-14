@@ -2,6 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::thread;
 use std::net::{TcpListener, TcpStream, Shutdown};
 use std::io::{Read, Write};
+use std::time::{SystemTime, UNIX_EPOCH};
 use rsa::{PaddingScheme, PublicKey, RsaPublicKey};
 use serde::{Serialize, Deserialize};
 use sha2::Digest;
@@ -17,11 +18,14 @@ struct User<'a>{
     public_key: RsaPublicKey,
 }
 
-fn check_timestamp(ts: u64) -> bool {
+fn check_timestamp(ts: u64, user: &str) -> bool {
     // If it is unique and it is valid then for all I care it is fine.
     // Checking for uniqueness
-
-    true
+    let delta = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64 - ts as i64;
+    !std::str::from_utf8(&fs::read(LEDGER).unwrap()[..]).unwrap().split('\n').any(|line| {
+        let mut line_parts = line.split(' ');
+        line != "" && line_parts.next().unwrap() == ts.to_string() && line_parts.next().unwrap() == user
+    }) && delta <= 10 && delta >= 0
 }
 
 fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
@@ -31,14 +35,15 @@ fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
 
     let msg = std::str::from_utf8(&transaction_buf[8..52]).unwrap();
 
+    // Sender
+    let sender = msg.split(' ').next().unwrap().trim();
+
     // Time Stamp
     let mut raw_ts: [u8; 8] = [0; 8];
     raw_ts.copy_from_slice(&transaction_buf[..8]);
     let ts = u64::from_be_bytes(raw_ts);
     // Check Timestamp
-    if check_timestamp(ts) {
-        // Sender
-        let sender = msg.split(' ').next().unwrap().trim();
+    if check_timestamp(ts, sender) {
         // Check Sender
         if let Ok(user_raw) = fs::read(USR_DIR.to_owned() + sender){
             let user: User = bincode::deserialize(&user_raw[..]).unwrap();
