@@ -159,7 +159,7 @@ fn main() -> Result<(), io::Error> {
     Ok(())
 }
 
-
+/// Make request from server.
 fn make_request(msg: &[u8], await_data: bool) {
     match TcpStream::connect(SERVER) {
         Ok(mut stream) => {
@@ -169,11 +169,11 @@ fn make_request(msg: &[u8], await_data: bool) {
 
             println!("Sent request, awaiting confirmation...");
 
-            let mut confirmation = [0_u8; 2];
+            let mut confirmation = [0_u8; 3];
             match stream.read_exact(&mut confirmation) {
                 Ok(_) => {
                     match (&confirmation, await_data) {
-                        (b"GO", true) => {
+                        (b"OK ", true) => {
                             println!("Received Confirmation, awaiting data...");
                             let mut data = [0_u8; 8];
                             match stream.read_exact(&mut data) {
@@ -185,12 +185,17 @@ fn make_request(msg: &[u8], await_data: bool) {
                                 }
                             }
                         },
-                        (b"GO", false) => {
-                            println!("Success");
+                        (b"OK ", false) => {
+                            println!("Confirmation Received. Success");
                         },
-                        (b"NO", _) => {
-                            println!("Failure");
-                        },
+
+                        // Errors
+                        (b"E00", _) => { println!("Error 00: Bad send. This should be unreachable."); },
+                        (b"E01", _) => { println!("Error 01: Bad timestamp. Your transaction took too long or was sent within a second of your last transaction."); },
+                        // Remote account creation coming soon
+                        (b"E02", _) => { println!("Error 02: Your user is not registered with the server. Please hand an administrator your public key so that he may register you."); }, 
+                        (b"E03", _) => { println!("Error 03: Rejected badly signed transaction."); },
+
                         (other, _) => {
                             let text = from_utf8(other).unwrap();
                             println!("Unexpected reply: {}", text);
@@ -206,5 +211,4 @@ fn make_request(msg: &[u8], await_data: bool) {
             println!("Failed to connect: {}", e);
         }
     }
-    println!("Terminated.");
 }

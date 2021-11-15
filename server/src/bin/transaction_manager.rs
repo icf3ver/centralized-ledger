@@ -65,18 +65,18 @@ fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
                     eprintln!("Couldn't write to file: {}", e);
                 }
                 println!("Transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
-                stream.write(b"GO").unwrap();
+                stream.write(b"OK ").unwrap();
             } else {
-                println!("Bad transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
-                stream.write(b"NO").unwrap();
+                println!("Badly signed transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
+                stream.write(b"E03").unwrap();
             }
         } else {
             println!("Unknown user {} at {} tried: {}", sender, stream.peer_addr().unwrap(), msg.trim());
-            stream.write(b"NO").unwrap();
+            stream.write(b"E02").unwrap();
         }
     } else {
         println!("Bad timestamp client {} : sent {} at {}s", stream.peer_addr().unwrap(), msg.trim(), ts);
-        stream.write(b"NO").unwrap();
+        stream.write(b"E01").unwrap();
     }
 }
 
@@ -120,7 +120,7 @@ fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) 
     if &request == b"BAL" && other_target.is_none() { // only single arg request
         let sum = get_all_owed(first_target) as i64 - get_all_owes(first_target) as i64;
         println!("Balance request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
-        stream.write(&[b"GO", &sum.to_be_bytes()[..]].concat()[..]).unwrap();
+        stream.write(&[b"OK ", &sum.to_be_bytes()[..]].concat()[..]).unwrap();
     } else if &request == b"OWE" && other_target.is_some() {
         let other_target = other_target.unwrap();
         let result = match (first_target, other_target) { // no context is a good idea
@@ -129,10 +129,10 @@ fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) 
             (first, other) => get_owe(Some(first), Some(other))
         } as i64;
         println!("Debt request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
-        stream.write(&[b"GO", &result.to_be_bytes()[..]].concat()[..]).unwrap();
+        stream.write(&[b"OK ", &result.to_be_bytes()[..]].concat()[..]).unwrap();
     } else {
         println!("Bad request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
-        stream.write("NO".as_bytes()).unwrap();
+        stream.write("E00".as_bytes()).unwrap();
     }
 }
 
