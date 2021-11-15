@@ -1,8 +1,9 @@
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::thread;
 use std::net::{TcpListener, TcpStream, Shutdown};
 use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
+use rsa::pkcs8::FromPublicKey;
 use rsa::{PaddingScheme, PublicKey, RsaPublicKey};
 use serde::{Serialize, Deserialize};
 use sha2::Digest;
@@ -80,6 +81,23 @@ fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
     }
 }
 
+fn handle_new_account_request (transaction_buf: [u8; 466], mut stream: TcpStream) {
+    let (uname, public_key) = (
+        std::str::from_utf8(&transaction_buf[..15]).unwrap().trim().to_owned(), 
+        RsaPublicKey::from_public_key_pem(std::str::from_utf8(&transaction_buf[15..]).unwrap()).unwrap()
+    );
+    let file_name = format!("{}{}", USR_DIR, uname);
+    let file_path = std::path::Path::new(&file_name);
+    if file_path.exists() {
+        stream.write(b"E04").unwrap();
+    } else {
+        let mut file = File::create(file_path).unwrap();
+        file.write_all(&bincode::serialize(&User{ uname: &uname, public_key }).unwrap()[..]).unwrap();
+        println!("New user {}", uname);
+        stream.write(b"OK ").unwrap();
+    }
+}
+
 fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) {
     /// how much first send to other. Default (None) is everyone.
     fn get_owe (first: Option<&str>, other: Option<&str>) -> u64 {
@@ -144,6 +162,14 @@ fn handle_client(mut stream: TcpStream) {
             let mut transaction_buf = [0_u8; 308];
             if let Ok(()) = stream.read_exact(&mut transaction_buf){
                 handle_transaction(transaction_buf, stream);
+            } else {
+                println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
+                stream.shutdown(Shutdown::Both).unwrap();
+            }
+        } else if &request == b"ACC" {
+            let mut account_buf = [0_u8; 466];
+            if let Ok(()) = stream.read_exact(&mut account_buf){
+                handle_new_account_request(account_buf, stream);
             } else {
                 println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
                 stream.shutdown(Shutdown::Both).unwrap();

@@ -88,16 +88,19 @@ fn main() -> Result<(), io::Error> {
         
         match request_type.as_str().trim() {
             "SEN" => {
-                println!("Uname:");
+                print!("Uname: ");
                 let mut uname = String::new(); 
+                std::io::stdout().flush().unwrap();
                 io::stdin().read_line(&mut uname)?;
             
-                println!("To:");
+                print!("To: ");
                 let mut dest = String::new(); 
+                std::io::stdout().flush().unwrap();
                 io::stdin().read_line(&mut dest)?;
                 
-                println!("amount:");
+                print!("amount: ");
                 let mut amount = String::new(); 
+                std::io::stdout().flush().unwrap();
                 io::stdin().read_line(&mut amount)?;
 
                 let transaction = format!("{:44}", format!("{} {} {}", uname.trim(), dest.trim(), amount.trim()));    
@@ -110,8 +113,9 @@ fn main() -> Result<(), io::Error> {
                 }
             }
             "BAL" => {
-                println!("Uname :");
+                print!("Uname: ");
                 let mut uname = String::new(); 
+                std::io::stdout().flush().unwrap();
                 io::stdin().read_line(&mut uname)?;
 
                 let request = format!("{:50}", uname.trim());
@@ -124,12 +128,14 @@ fn main() -> Result<(), io::Error> {
                 }
             },
             "OWE" => {
-                println!("<Uname> Owes (* for everyone):");
+                print!("<Uname> Owes (* for everyone): ");
                 let mut owes = String::new(); 
+                std::io::stdout().flush().unwrap();
                 io::stdin().read_line(&mut owes)?;
             
-                println!("To <Uname> (* for everyone):");
+                print!("To <Uname> (* for everyone): ");
                 let mut to = String::new(); 
+                std::io::stdout().flush().unwrap();
                 io::stdin().read_line(&mut to)?;
 
                 let request = format!("{:50}", format!("{} {}", owes.trim(), to.trim()));
@@ -192,8 +198,7 @@ fn make_request(msg: &[u8], await_data: bool) {
                         // Errors
                         (b"E00", _) => { println!("Error 00: Bad send. This should be unreachable."); },
                         (b"E01", _) => { println!("Error 01: Bad timestamp. Your transaction took too long or was sent within a second of your last transaction."); },
-                        // Remote account creation coming soon
-                        (b"E02", _) => { println!("Error 02: Your user is not registered with the server. Please hand an administrator your public key so that he may register you."); }, 
+                        (b"E02", _) => { println!("Error 02: Your user is not registered with the server. Please create an account with the signup binary."); }, 
                         (b"E03", _) => { println!("Error 03: Rejected badly signed transaction."); },
 
                         (other, _) => {
