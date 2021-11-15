@@ -61,7 +61,7 @@ fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
                     hex_signature.push_str(format!("{:02x}", byte).as_str());
                 }
     
-                if let Err(e) = writeln!(file, "{}{}{}", ts, msg, hex_signature) {
+                if let Err(e) = writeln!(file, "{} {}{}", ts, msg, hex_signature) {
                     eprintln!("Couldn't write to file: {}", e);
                 }
                 println!("Transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
@@ -88,6 +88,7 @@ fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) 
         std::str::from_utf8(&fs::read(LEDGER).unwrap()[..]).unwrap().split('\n').for_each(|line| {
             if line != "" {
                 let mut line_parts = line.split(' ');
+                line_parts.next().unwrap(); // timestamp
                 let first_ledger = line_parts.next().unwrap();
                 let other_ledger = line_parts.next().unwrap();
                 if (first.is_none() || first_ledger == first.unwrap()) 
