@@ -10,3 +10,5 @@ rsa = { version = "0.5.0", features = ["serde"] }
 sha2 = "0.9.8"
 serde = { version = "1.0.130", features = ["derive"] }
 bincode = "1.0.130"
+
+libc = "*"

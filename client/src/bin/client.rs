@@ -10,9 +10,10 @@ const PRIVATE_KEY: &'static str = include_str!("../../private_key.pem");
 const SERVER: &'static str = "localhost:5555";
 
 fn user_verify_nonaction(ty: &[u8; 3], msg: &str) -> Result<[u8; 53], io::Error> {
-    println!("Please verify the request:\n{:50}", msg);
-    println!("Is this correct? [y/N]:");
+    println!("Please verify the request: \n > {:50}", msg);
+    print!("Is this correct? [y/N]: ");
     let mut approved = String::new();
+    std::io::stdout().flush().unwrap();
     io::stdin().read_line(&mut approved)?;
     let approved = approved.trim();
 
@@ -58,9 +59,10 @@ fn user_verify_action(ty: &[u8; 3], msg: &str) -> Result<[u8; 311], io::Error> {
         signed_msg
     }
 
-    println!("Please confirm the ACTION:\n{:44}", msg); // TODO: checksize
-    println!("Is this correct? [y/N]:");
+    println!("Please confirm the ACTION: \n > {:44}", msg); // TODO: checksize
+    print!("Is this correct? [y/N]: ");
     let mut approved = String::new();
+    std::io::stdout().flush().unwrap();
     io::stdin().read_line(&mut approved)?;
     let approved = approved.trim();
 
@@ -81,8 +83,9 @@ fn timestamp() -> [u8; 8] {
 
 fn main() -> Result<(), io::Error> {
     while {
-        println!("Request Type:");
+        print!("Request Type: ");
         let mut request_type = String::new(); 
+        std::io::stdout().flush().unwrap();
         io::stdin().read_line(&mut &mut request_type)?;
         request_type = request_type.to_uppercase();
         
@@ -153,9 +156,9 @@ fn main() -> Result<(), io::Error> {
         }
 
         // Another Request?
-        println!("Would You like to make another request? [y/N]: ");
-    
+        print!("Would You like to make another request? [y/N]: ");
         let mut approved = String::new();
+        std::io::stdout().flush().unwrap();
         io::stdin().read_line(&mut approved)?;
         let approved = approved.trim();
     
@@ -200,6 +203,8 @@ fn make_request(msg: &[u8], await_data: bool) {
                         (b"E01", _) => { println!("Error 01: Bad timestamp. Your transaction took too long or was sent within a second of your last transaction."); },
                         (b"E02", _) => { println!("Error 02: Your user is not registered with the server. Please create an account with the signup binary."); }, 
                         (b"E03", _) => { println!("Error 03: Rejected badly signed transaction."); },
+                        // E04 is an error for the signup binary :: TODO remap error codes
+                        (b"E05", _) => { println!("Error 05: The user you tried to send to does not exist."); },
 
                         (other, _) => {
                             let text = from_utf8(other).unwrap();

@@ -1,14 +1,14 @@
 use std::fs::{self, File, OpenOptions};
 use std::thread;
 use std::net::{TcpListener, TcpStream, Shutdown};
-use std::io::{Read, Write};
+use std::io::{Error, ErrorKind, Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use rsa::pkcs8::FromPublicKey;
 use rsa::{PaddingScheme, PublicKey, RsaPublicKey};
 use serde::{Serialize, Deserialize};
 use sha2::Digest;
 
-// const REQUESTS: [&'static str; 3] = ["SEN", "BAL", "OWE"];
+// const REQUESTS: [&'static str; 3] = ["SEN", "BAL", "OWE", "ACC"];
 
 const LEDGER: &'static str = "./server/ledger.txt";
 const USR_DIR: &'static str = "./server/usr_dir/";
@@ -37,48 +37,72 @@ fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
     let msg = std::str::from_utf8(&transaction_buf[8..52]).unwrap();
 
     // Sender
-    let sender = msg.split(' ').next().unwrap().trim();
+    let mut msg_pts_tmp = msg.split(' ');
+    let sender = msg_pts_tmp.next().unwrap().trim();
+    let recipient = msg_pts_tmp.next().unwrap().trim();
+    drop(msg_pts_tmp);
 
     // Time Stamp
     let mut raw_ts: [u8; 8] = [0; 8];
     raw_ts.copy_from_slice(&transaction_buf[..8]);
     let ts = u64::from_be_bytes(raw_ts);
+
     // Check Timestamp
-    if check_timestamp(ts, sender) {
-        // Check Sender
-        if let Ok(user_raw) = fs::read(USR_DIR.to_owned() + sender){
-            let user: User = bincode::deserialize(&user_raw[..]).unwrap();
-            let public_key = user.public_key;
-            // Check Signature
-            if let Ok(()) = public_key.verify(padding, &hash, signature){
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .append(true)
-                    .open(LEDGER)
-                    .unwrap();
-    
-                let mut hex_signature = String::new();
-                for byte in signature {
-                    hex_signature.push_str(format!("{:02x}", byte).as_str());
-                }
-    
-                if let Err(e) = writeln!(file, "{} {}{}", ts, msg, hex_signature) {
-                    eprintln!("Couldn't write to file: {}", e);
-                }
-                println!("Transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
-                stream.write(b"OK ").unwrap();
-            } else {
-                println!("Badly signed transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
-                stream.write(b"E03").unwrap();
-            }
-        } else {
-            println!("Unknown user {} at {} tried: {}", sender, stream.peer_addr().unwrap(), msg.trim());
-            stream.write(b"E02").unwrap();
-        }
-    } else {
+    if !check_timestamp(ts, sender) {
         println!("Bad timestamp client {} : sent {} at {}s", stream.peer_addr().unwrap(), msg.trim(), ts);
         stream.write(b"E01").unwrap();
+        return ();
     }
+
+    // Check Sender
+    let user_raw = match fs::read(USR_DIR.to_owned() + sender) {
+        Ok(raw) => raw,
+        Err(_e) => {
+            println!("Unknown user {} at {} tried: {}", sender, stream.peer_addr().unwrap(), msg.trim());
+            stream.write(b"E02").unwrap();
+            return ();
+        }
+    };
+    let user: User = bincode::deserialize(&user_raw[..]).unwrap();
+
+    // Check Recipient
+    #[allow(unused_variables)] // Compiler Bug
+    let error = Error::from(ErrorKind::NotFound);
+    #[allow(unused_variables)]
+    if let Err(error) = fs::read(USR_DIR.to_owned() + recipient) {
+        println!("User {} tried to send to unknown user {}: {}", sender, stream.peer_addr().unwrap(), msg.trim());
+        stream.write(b"E05").unwrap(); // TODO remap error codes
+        return ();
+    };
+    
+    // Check Signature
+    let public_key = user.public_key;
+    if let Err(_) = public_key.verify(padding, &hash, signature) {
+        println!("Badly signed transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
+        stream.write(b"E03").unwrap();
+        return ();
+    }
+
+    // Write To Ledger
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open(LEDGER)
+        .unwrap();
+
+    // Store signature as hex (for now)
+    let mut hex_signature = String::new();
+    for byte in signature {
+        hex_signature.push_str(format!("{:02x}", byte).as_str());
+    }
+
+    if let Err(e) = writeln!(file, "{} {}{}", ts, msg, hex_signature) {
+        eprintln!("Couldn't write to ledger: {}", e);
+        stream.shutdown(Shutdown::Both).unwrap();
+    }
+    
+    println!("Transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
+    stream.write(b"OK ").unwrap();
 }
 
 fn handle_new_account_request (transaction_buf: [u8; 466], mut stream: TcpStream) {
