@@ -160,53 +160,61 @@ fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) 
     let first_target = msg_components.next().unwrap_or(""); // Caught by request.is_none()
     let other_target = msg_components.next();
 
-    if &request == b"BAL" && other_target.is_none() { // only single arg request
-        let sum = get_all_owed(first_target) as i64 - get_all_owes(first_target) as i64;
-        println!("Balance request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
-        stream.write(&[b"OK ", &sum.to_be_bytes()[..]].concat()[..]).unwrap();
-    } else if &request == b"OWE" && other_target.is_some() {
-        let other_target = other_target.unwrap();
-        let result = match (first_target, other_target) { // no context is a good idea
-            (first, "*") => get_all_owes(first),
-            ("*", other) => get_all_owed(other),
-            (first, other) => get_owe(Some(first), Some(other))
-        } as i64;
-        println!("Debt request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
-        stream.write(&[b"OK ", &result.to_be_bytes()[..]].concat()[..]).unwrap();
-    } else {
-        println!("Bad request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
-        stream.write("E00".as_bytes()).unwrap();
+    match &request {
+        b"BAL" if other_target.is_none() => { // only single arg request
+            let sum = get_all_owed(first_target) as i64 - get_all_owes(first_target) as i64;
+            println!("Balance request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
+            stream.write(&[b"OK ", &sum.to_be_bytes()[..]].concat()[..]).unwrap();
+        },
+        b"OWE" if other_target.is_some() => {
+            let other_target = other_target.unwrap();
+            let result = match (first_target, other_target) { // no context is a good idea
+                (first, "*") => get_all_owes(first),
+                ("*", other) => get_all_owed(other),
+                (first, other) => get_owe(Some(first), Some(other))
+            } as i64;
+            println!("Debt request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
+            stream.write(&[b"OK ", &result.to_be_bytes()[..]].concat()[..]).unwrap();
+        },
+        _ => {
+            println!("Bad request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
+            stream.write("E00".as_bytes()).unwrap();
+        }
     }
 }
 
 fn handle_client(mut stream: TcpStream) {
     let mut request = [0_u8; 3];
     if let Ok(()) = stream.read_exact(&mut request) {
-        if &request == b"SEN" {
-            let mut transaction_buf = [0_u8; 308];
-            if let Ok(()) = stream.read_exact(&mut transaction_buf){
-                handle_transaction(transaction_buf, stream);
-            } else {
-                println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
-                stream.shutdown(Shutdown::Both).unwrap();
+        match &request {
+            b"SEN" => {
+                let mut transaction_buf = [0_u8; 308];
+                if let Ok(()) = stream.read_exact(&mut transaction_buf){
+                    handle_transaction(transaction_buf, stream);
+                } else {
+                    println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
+                    stream.shutdown(Shutdown::Both).unwrap();
+                }
+            },
+            b"ACC" => {
+                let mut account_buf = [0_u8; 466];
+                if let Ok(()) = stream.read_exact(&mut account_buf){
+                    handle_new_account_request(account_buf, stream);
+                } else {
+                    println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
+                    stream.shutdown(Shutdown::Both).unwrap();
+                }
+            },
+            _ => {
+                let mut other_buf = [0_u8; 50];
+                if let Ok(()) = stream.read_exact(&mut other_buf) {
+                    handle_request(request, other_buf, stream);
+                } else {
+                    println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
+                    stream.shutdown(Shutdown::Both).unwrap();
+                }
             }
-        } else if &request == b"ACC" {
-            let mut account_buf = [0_u8; 466];
-            if let Ok(()) = stream.read_exact(&mut account_buf){
-                handle_new_account_request(account_buf, stream);
-            } else {
-                println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
-                stream.shutdown(Shutdown::Both).unwrap();
-            }
-        } else {
-            let mut other_buf = [0_u8; 50];
-            if let Ok(()) = stream.read_exact(&mut other_buf) {
-                handle_request(request, other_buf, stream);
-            } else {
-                println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
-                stream.shutdown(Shutdown::Both).unwrap();
-            }
-        } 
+        }
     } else {
         println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
         stream.shutdown(Shutdown::Both).unwrap();
