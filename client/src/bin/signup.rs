@@ -79,7 +79,7 @@ fn send_pk(msg: &[u8]) {
                         b"OK " => { println!("Confirmation Received. Success"); },
 
                         // Errors
-                        b"E04" => { println!("Error 04: A user with a similar username already exists please pick another username."); },
+                        b"E06" => { println!("Error 06: A user with a similar username already exists please pick another username."); },
 
                         other => {
                             let text = from_utf8(other).unwrap();

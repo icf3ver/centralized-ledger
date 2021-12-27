@@ -7,11 +7,29 @@ use rsa::pkcs8::FromPublicKey;
 use rsa::{PaddingScheme, PublicKey, RsaPublicKey};
 use serde::{Serialize, Deserialize};
 use sha2::Digest;
+use log::{info, warn, error};
 
 // const REQUESTS: [&'static str; 3] = ["SEN", "BAL", "OWE", "ACC"];
 
 const LEDGER: &'static str = "./server/ledger.txt";
 const USR_DIR: &'static str = "./server/usr_dir/";
+
+#[derive(Clone, Copy)]
+enum SrvError {
+    SystemError = /*E0*/0, // Err when trying to access resources
+    BadRequest, // Request does not exist
+    BadTimestamp, // Timestamp is off by over 10 seconds or 
+    BadSignature, // Signature is invalid
+    UnknownSender, // The sender does not exist as a user
+    UnknownDestination, // The recipient does not exist as a user
+    UserExists, // Attempted creation of user that already exists
+}
+
+impl SrvError {
+    fn err_code(&self) -> String {
+        format!("E{:0>2}", *self as u32)
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct User<'a>{
@@ -26,7 +44,7 @@ fn check_timestamp(ts: u64, user: &str) -> bool {
     !std::str::from_utf8(&fs::read(LEDGER).unwrap()[..]).unwrap().split('\n').any(|line| {
         let mut line_parts = line.split(' ');
         line != "" && line_parts.next().unwrap() == ts.to_string() && line_parts.next().unwrap() == user
-    }) && delta <= 10 && delta >= 0
+    }) && delta <= 10 // && delta >= 0 // = && true because delta is an integer
 }
 
 fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
@@ -49,8 +67,8 @@ fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
 
     // Check Timestamp
     if !check_timestamp(ts, sender) {
-        println!("Bad timestamp client {} : sent {} at {}s", stream.peer_addr().unwrap(), msg.trim(), ts);
-        stream.write(b"E01").unwrap();
+        warn!("Bad timestamp client {} : sent {} at {}s", stream.peer_addr().unwrap(), msg.trim(), ts);
+        stream.write(SrvError::BadTimestamp.err_code().as_bytes()).unwrap();
         return ();
     }
 
@@ -58,8 +76,8 @@ fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
     let user_raw = match fs::read(USR_DIR.to_owned() + sender) {
         Ok(raw) => raw,
         Err(_e) => {
-            println!("Unknown user {} at {} tried: {}", sender, stream.peer_addr().unwrap(), msg.trim());
-            stream.write(b"E02").unwrap();
+            warn!("Unknown user {} at {} tried: {}", sender, stream.peer_addr().unwrap(), msg.trim());
+            stream.write(SrvError::UnknownSender.err_code().as_bytes()).unwrap();
             return ();
         }
     };
@@ -70,16 +88,16 @@ fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
     let error = Error::from(ErrorKind::NotFound);
     #[allow(unused_variables)]
     if let Err(error) = fs::read(USR_DIR.to_owned() + recipient) {
-        println!("User {} tried to send to unknown user {}: {}", sender, stream.peer_addr().unwrap(), msg.trim());
-        stream.write(b"E05").unwrap(); // TODO remap error codes
+        warn!("User {} tried to send to unknown user {}: {}", sender, stream.peer_addr().unwrap(), msg.trim());
+        stream.write(SrvError::UnknownDestination.err_code().as_bytes()).unwrap(); // TODO remap error codes
         return ();
     };
     
     // Check Signature
     let public_key = user.public_key;
     if let Err(_) = public_key.verify(padding, &hash, signature) {
-        println!("Badly signed transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
-        stream.write(b"E03").unwrap();
+        error!("Badly signed transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
+        stream.write(SrvError::BadSignature.err_code().as_bytes()).unwrap();
         return ();
     }
 
@@ -97,11 +115,13 @@ fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
     }
 
     if let Err(e) = writeln!(file, "{} {}{}", ts, msg, hex_signature) {
-        eprintln!("Couldn't write to ledger: {}", e);
+        error!("Couldn't write to ledger: {}", e);
+        stream.write(SrvError::SystemError.err_code().as_bytes()).unwrap();
         stream.shutdown(Shutdown::Both).unwrap();
+        return ();
     }
     
-    println!("Transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
+    info!("Transaction by {} : {}", stream.peer_addr().unwrap(), msg.trim());
     stream.write(b"OK ").unwrap();
 }
 
@@ -113,11 +133,12 @@ fn handle_new_account_request (transaction_buf: [u8; 466], mut stream: TcpStream
     let file_name = format!("{}{}", USR_DIR, uname);
     let file_path = std::path::Path::new(&file_name);
     if file_path.exists() {
-        stream.write(b"E04").unwrap();
+        warn!("Attempted reuse of uname {} by {}", uname, stream.peer_addr().unwrap());
+        stream.write(SrvError::UserExists.err_code().as_bytes()).unwrap();
     } else {
         let mut file = File::create(file_path).unwrap();
         file.write_all(&bincode::serialize(&User{ uname: &uname, public_key }).unwrap()[..]).unwrap();
-        println!("New user {}", uname);
+        info!("New user {}", uname);
         stream.write(b"OK ").unwrap();
     }
 }
@@ -125,7 +146,6 @@ fn handle_new_account_request (transaction_buf: [u8; 466], mut stream: TcpStream
 fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) {
     /// how much first send to other. Default (None) is everyone.
     fn get_owe (first: Option<&str>, other: Option<&str>) -> u64 {
-        println!("{:?} {:?}", first, other);
         let mut result = 0;
         std::str::from_utf8(&fs::read(LEDGER).unwrap()[..]).unwrap().split('\n').for_each(|line| {
             if line != "" {
@@ -163,7 +183,7 @@ fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) 
     match &request {
         b"BAL" if other_target.is_none() => { // only single arg request
             let sum = get_all_owed(first_target) as i64 - get_all_owes(first_target) as i64;
-            println!("Balance request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
+            info!("Balance request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
             stream.write(&[b"OK ", &sum.to_be_bytes()[..]].concat()[..]).unwrap();
         },
         b"OWE" if other_target.is_some() => {
@@ -173,12 +193,12 @@ fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) 
                 ("*", other) => get_all_owed(other),
                 (first, other) => get_owe(Some(first), Some(other))
             } as i64;
-            println!("Debt request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
+            info!("Debt request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
             stream.write(&[b"OK ", &result.to_be_bytes()[..]].concat()[..]).unwrap();
         },
         _ => {
-            println!("Bad request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
-            stream.write("E00".as_bytes()).unwrap();
+            warn!("Bad request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
+            stream.write(SrvError::BadRequest.err_code().as_bytes()).unwrap();
         }
     }
 }
@@ -192,7 +212,7 @@ fn handle_client(mut stream: TcpStream) {
                 if let Ok(()) = stream.read_exact(&mut transaction_buf){
                     handle_transaction(transaction_buf, stream);
                 } else {
-                    println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
+                    warn!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
                     stream.shutdown(Shutdown::Both).unwrap();
                 }
             },
@@ -201,7 +221,7 @@ fn handle_client(mut stream: TcpStream) {
                 if let Ok(()) = stream.read_exact(&mut account_buf){
                     handle_new_account_request(account_buf, stream);
                 } else {
-                    println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
+                    warn!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
                     stream.shutdown(Shutdown::Both).unwrap();
                 }
             },
@@ -210,33 +230,32 @@ fn handle_client(mut stream: TcpStream) {
                 if let Ok(()) = stream.read_exact(&mut other_buf) {
                     handle_request(request, other_buf, stream);
                 } else {
-                    println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
+                    warn!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
                     stream.shutdown(Shutdown::Both).unwrap();
                 }
             }
         }
     } else {
-        println!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
+        warn!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
         stream.shutdown(Shutdown::Both).unwrap();
     }
 }
 
 fn main() {
+    env_logger::init();
     let listener = TcpListener::bind("0.0.0.0:5555").unwrap();
     // accept connections and process them, spawning a new thread for each one
-    println!("Server listening on port 5555");
+    info!(target: "centralized_ledger_events", "Server listening on port 5555");
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                println!("Connection: {}", stream.peer_addr().unwrap());
-                thread::spawn(move|| {
-                    // connection succeeded
+                info!("Connection: {}", stream.peer_addr().unwrap());
+                thread::spawn(move|| { 
                     handle_client(stream)
                 });
-            }
+            },
             Err(e) => {
-                // connection failed
-                println!("Error: {}", e);
+                warn!("A Connection Failed: {}", e);
             }
         }
     }

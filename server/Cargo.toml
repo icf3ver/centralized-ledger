@@ -1,6 +1,6 @@
 [package]
 name = "server"
-version = "0.2.2"
+version = "0.3.2"
 edition = "2018"
 
 [dependencies]
@@ -12,3 +12,6 @@ serde = { version = "1.0.130", features = ["derive"] }
 bincode = "1.0.130"
 
 libc = "*"
+
+log = "*"
+env_logger = "*"

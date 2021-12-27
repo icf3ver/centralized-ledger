@@ -199,17 +199,15 @@ fn make_request(msg: &[u8], await_data: bool) {
                         },
 
                         // Errors
-                        (b"E00", _) => { println!("Error 00: Bad send. This should be unreachable."); },
-                        (b"E01", _) => { println!("Error 01: Bad timestamp. Your transaction took too long or was sent within a second of your last transaction."); },
-                        (b"E02", _) => { println!("Error 02: Your user is not registered with the server. Please create an account with the signup binary."); }, 
+                        (b"E00", _) => { println!("Error 00: The server had issues accessing some resources."); },
+                        (b"E01", _) => { unreachable!("Error 01: Bad request type. This should be unreachable because user input is filtered."); },
+                        (b"E02", _) => { println!("Error 02: Bad timestamp. Your transaction took too long or was sent within a second of your last transaction."); },
                         (b"E03", _) => { println!("Error 03: Rejected badly signed transaction."); },
-                        // E04 is an error for the signup binary :: TODO remap error codes
+                        (b"E04", _) => { println!("Error 04: Your user is not registered with the server. Please create an account with the signup binary or check the username of the last transaction."); }, 
                         (b"E05", _) => { println!("Error 05: The user you tried to send to does not exist."); },
+                        // E06 is an error for the signup binary
 
-                        (other, _) => {
-                            let text = from_utf8(other).unwrap();
-                            println!("Unexpected reply: {}", text);
-                        },
+                        (other, _) => { print!("Unexpected response: {}", std::str::from_utf8(other).unwrap()); },
                     }
                 },
                 Err(e) => {
