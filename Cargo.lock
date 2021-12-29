@@ -196,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "ledger"
-version = "0.3.2"
+version = "0.3.1"
 dependencies = [
  "rand",
  "rpassword",
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.3.2"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "env_logger",

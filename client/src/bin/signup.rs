@@ -43,7 +43,9 @@ fn main() -> Result<(), io::Error> {
     // TODO: secure sk locally
 
     let pk = RsaPublicKey::from(&sk);
-    assert_eq!(RsaPublicKey::to_public_key_pem(&pk).unwrap().as_bytes().len(), 451); // for now pem
+    let der_pk = RsaPublicKey::to_public_key_der(&pk).unwrap();
+    let der_pk_bytes: &[u8] = der_pk.as_ref();
+    assert_eq!(der_pk_bytes.len(), 294);
     
     print!("To confirm creation of this account reentering the username: ");
     let mut confirmation = String::new();
@@ -52,10 +54,10 @@ fn main() -> Result<(), io::Error> {
     confirmation = confirmation.trim().to_owned();
 
     if confirmation == uname {
-        let mut msg: [u8; 469] = [0; 469];
+        let mut msg: [u8; 312] = [0; 312];
         let (raw_ty_uname, raw_pk) = msg.split_at_mut(18);
         raw_ty_uname.copy_from_slice(format!("ACC{:15}", uname).as_bytes());
-        raw_pk.copy_from_slice(RsaPublicKey::to_public_key_pem(&pk).unwrap().as_bytes());
+        raw_pk.copy_from_slice(der_pk_bytes);
         send_pk(&msg);
         Ok(())
     } else {

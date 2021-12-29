@@ -125,10 +125,10 @@ fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
     stream.write(b"OK ").unwrap();
 }
 
-fn handle_new_account_request (transaction_buf: [u8; 466], mut stream: TcpStream) {
+fn handle_new_account_request (transaction_buf: [u8; 309], mut stream: TcpStream) {
     let (uname, public_key) = (
         std::str::from_utf8(&transaction_buf[..15]).unwrap().trim().to_owned(), 
-        RsaPublicKey::from_public_key_pem(std::str::from_utf8(&transaction_buf[15..]).unwrap()).unwrap()
+        RsaPublicKey::from_public_key_der(&transaction_buf[15..]).unwrap()
     );
     let file_name = format!("{}{}", USR_DIR, uname);
     let file_path = std::path::Path::new(&file_name);
@@ -217,7 +217,7 @@ fn handle_client(mut stream: TcpStream) {
                 }
             },
             b"ACC" => {
-                let mut account_buf = [0_u8; 466];
+                let mut account_buf = [0_u8; 309];
                 if let Ok(()) = stream.read_exact(&mut account_buf){
                     handle_new_account_request(account_buf, stream);
                 } else {
