@@ -1,6 +1,6 @@
 [package]
 name = "server"
-version = "0.3.1"
+version = "1.0.0"
 edition = "2018"
 
 [dependencies]
@@ -8,6 +8,7 @@ edition = "2018"
 tokio = { version = "1.9.*", features = ["full"] }
 rsa = { version = "0.5.0", features = ["serde"] }
 sha2 = "0.9.8"
+rand = "*"
 serde = { version = "1.0.130", features = ["derive"] }
 bincode = "1.0.130"
 

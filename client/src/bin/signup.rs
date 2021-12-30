@@ -14,8 +14,8 @@ fn main() -> Result<(), io::Error> {
         io::stdin().read_line(&mut uname)?;
         uname = uname.trim().to_owned();
         // Rust does not allow for regex without dependencies
-        uname.len() > 15 || uname.to_lowercase().chars().any(|c| { match c { 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' => false, _ => true } })
-    } { println!("Please make sure the username does not contain any special characters and is no longer than 15 characters."); }
+        uname.len() > 18 || uname.to_lowercase().chars().any(|c| { match c { 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' => false, _ => true } })
+    } { println!("Please make sure the username does not contain any special characters and is no longer than 18 characters."); }
 
     // let mut key_path = String::new();
     // while {
@@ -54,9 +54,9 @@ fn main() -> Result<(), io::Error> {
     confirmation = confirmation.trim().to_owned();
 
     if confirmation == uname {
-        let mut msg: [u8; 312] = [0; 312];
-        let (raw_ty_uname, raw_pk) = msg.split_at_mut(18);
-        raw_ty_uname.copy_from_slice(format!("ACC{:15}", uname).as_bytes());
+        let mut msg: [u8; 315] = [0; 315];
+        let (raw_ty_uname, raw_pk) = msg.split_at_mut(21);
+        raw_ty_uname.copy_from_slice(format!("ACC{:18}", uname).as_bytes());
         raw_pk.copy_from_slice(der_pk_bytes);
         send_pk(&msg);
         Ok(())

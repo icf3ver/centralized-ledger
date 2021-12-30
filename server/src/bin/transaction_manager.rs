@@ -3,11 +3,12 @@ use std::thread;
 use std::net::{TcpListener, TcpStream, Shutdown};
 use std::io::{Error, ErrorKind, Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
-use rsa::pkcs8::FromPublicKey;
-use rsa::{PaddingScheme, PublicKey, RsaPublicKey};
+use rsa::pkcs8::{FromPublicKey, ToPublicKey};
+use rsa::{PaddingScheme, PublicKey, RsaPublicKey, RsaPrivateKey};
 use serde::{Serialize, Deserialize};
 use sha2::Digest;
 use log::{info, warn, error};
+use rand::rngs::OsRng;
 
 // const REQUESTS: [&'static str; 3] = ["SEN", "BAL", "OWE", "ACC"];
 
@@ -47,15 +48,15 @@ fn check_timestamp(ts: u64, user: &str) -> bool {
     }) && delta <= 10 // && delta >= 0 // = && true because delta is an integer
 }
 
-fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
-    let hash: &[u8] = &sha2::Sha512::digest(&transaction_buf[..52])[..];
-    let signature = &transaction_buf[52..];
+fn handle_transaction (transaction_buf: [u8; 312], mut stream: TcpStream) {
+    let hash: &[u8] = &sha2::Sha512::digest(&transaction_buf[..56])[..];
+    let signature = &transaction_buf[56..];
     let padding = PaddingScheme::new_pkcs1v15_sign(Some(rsa::Hash::SHA3_512));
 
-    let msg = std::str::from_utf8(&transaction_buf[8..52]).unwrap();
+    let msg = std::str::from_utf8(&transaction_buf[8..56]).unwrap();
 
     // Sender
-    let mut msg_pts_tmp = msg.split(' ');
+    let mut msg_pts_tmp = msg.split_whitespace();
     let sender = msg_pts_tmp.next().unwrap().trim();
     let recipient = msg_pts_tmp.next().unwrap().trim();
     drop(msg_pts_tmp);
@@ -125,10 +126,10 @@ fn handle_transaction (transaction_buf: [u8; 308], mut stream: TcpStream) {
     stream.write(b"OK ").unwrap();
 }
 
-fn handle_new_account_request (transaction_buf: [u8; 309], mut stream: TcpStream) {
+fn handle_new_account_request (account_buf: [u8; 312], mut stream: TcpStream) {
     let (uname, public_key) = (
-        std::str::from_utf8(&transaction_buf[..15]).unwrap().trim().to_owned(), 
-        RsaPublicKey::from_public_key_der(&transaction_buf[15..]).unwrap()
+        std::str::from_utf8(&account_buf[..18]).unwrap().trim().to_owned(), 
+        RsaPublicKey::from_public_key_der(&account_buf[18..]).unwrap()
     );
     let file_name = format!("{}{}", USR_DIR, uname);
     let file_path = std::path::Path::new(&file_name);
@@ -143,13 +144,13 @@ fn handle_new_account_request (transaction_buf: [u8; 309], mut stream: TcpStream
     }
 }
 
-fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) {
+fn handle_request(request: &[u8], other_buf: [u8; 48], mut stream: TcpStream) {
     /// how much first send to other. Default (None) is everyone.
     fn get_owe (first: Option<&str>, other: Option<&str>) -> u64 {
         let mut result = 0;
         std::str::from_utf8(&fs::read(LEDGER).unwrap()[..]).unwrap().split('\n').for_each(|line| {
             if line != "" {
-                let mut line_parts = line.split(' ');
+                let mut line_parts = line.split_whitespace();
                 line_parts.next().unwrap(); // timestamp
                 let first_ledger = line_parts.next().unwrap();
                 let other_ledger = line_parts.next().unwrap();
@@ -180,7 +181,7 @@ fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) 
     let first_target = msg_components.next().unwrap_or(""); // Caught by request.is_none()
     let other_target = msg_components.next();
 
-    match &request {
+    match request {
         b"BAL" if other_target.is_none() => { // only single arg request
             let sum = get_all_owed(first_target) as i64 - get_all_owes(first_target) as i64;
             info!("Balance request from {} : {}", stream.peer_addr().unwrap(), msg.trim());
@@ -203,13 +204,40 @@ fn handle_request(request: [u8; 3], other_buf: [u8; 50], mut stream: TcpStream) 
     }
 }
 
+fn ecs_rsa_decrypt<const I: usize, const O: usize>(sk: RsaPrivateKey, encrypted_buf: [u8; I]) -> [u8; O] {
+    let mut arr: [u8; O] = [0_u8; O];
+    arr.copy_from_slice(&encrypted_buf.chunks_exact(90).map(|block| {
+        sk.decrypt(PaddingScheme::new_oaep::<sha2::Sha256>(), block).unwrap()
+    }).flatten().collect::<Vec<u8>>()[..]);
+    arr
+}
+
 fn handle_client(mut stream: TcpStream) {
-    let mut request = [0_u8; 3];
-    if let Ok(()) = stream.read_exact(&mut request) {
-        match &request {
+    // encrypting communication                                    
+    let bit_k = 720;
+    // mLen <= k - 2hLen - 2
+    // hLen = 256/8 bytes = 32 bytes
+    // note the 2 more bytes are not usable
+    // k must therefore be bigger than 66 bytes every byte bigger means one character more
+    // max msg size is 469 bytes
+    // so k = 66 + 469 = 535 bytes or exactly 4280 bits
+    // This takes too long so I will use ECB first and later move to CBC
+    // block sizes will be 24 bytes
+    // therefore key size = 90 bytes or 720 bits
+    let sk = RsaPrivateKey::new(&mut OsRng, bit_k).expect("failed to generate a key");
+    let pk = sk.to_public_key();
+    let pk_der = RsaPublicKey::to_public_key_der(&pk).unwrap();
+    let pk_der_bytes = pk_der.as_ref();
+    stream.write_all(pk_der_bytes).unwrap();
+
+    let mut encrypted_request = [0_u8; 90];
+    if let Ok(()) = stream.read_exact(&mut encrypted_request) {
+        let padding = PaddingScheme::new_oaep::<sha2::Sha256>();
+        match &sk.decrypt(padding, &encrypted_request[..]).unwrap()[..] {
             b"SEN" => {
-                let mut transaction_buf = [0_u8; 308];
-                if let Ok(()) = stream.read_exact(&mut transaction_buf){
+                let mut encrypted_transaction_buf = [0_u8; 1170];
+                if let Ok(()) = stream.read_exact(&mut encrypted_transaction_buf){
+                    let transaction_buf: [u8; 312] = ecs_rsa_decrypt(sk, encrypted_transaction_buf);
                     handle_transaction(transaction_buf, stream);
                 } else {
                     warn!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
@@ -217,17 +245,19 @@ fn handle_client(mut stream: TcpStream) {
                 }
             },
             b"ACC" => {
-                let mut account_buf = [0_u8; 309];
-                if let Ok(()) = stream.read_exact(&mut account_buf){
+                let mut encrypted_account_buf = [0_u8; 1170];
+                if let Ok(()) = stream.read_exact(&mut encrypted_account_buf){
+                    let account_buf: [u8; 312] = ecs_rsa_decrypt(sk, encrypted_account_buf);
                     handle_new_account_request(account_buf, stream);
                 } else {
                     warn!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
                     stream.shutdown(Shutdown::Both).unwrap();
                 }
             },
-            _ => {
-                let mut other_buf = [0_u8; 50];
-                if let Ok(()) = stream.read_exact(&mut other_buf) {
+            request => {
+                let mut encrypted_other_buf = [0_u8; 180];
+                if let Ok(()) = stream.read_exact(&mut encrypted_other_buf) {
+                    let other_buf: [u8; 48] = ecs_rsa_decrypt(sk, encrypted_other_buf);
                     handle_request(request, other_buf, stream);
                 } else {
                     warn!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
